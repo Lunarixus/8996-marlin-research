@@ -55,6 +55,8 @@ extern void all_vm_events(unsigned long *);
 
 extern void vm_events_fold_cpu(int cpu);
 
+extern void dump_vm_events_counter(void);
+
 #else
 
 /* Disable counters */
@@ -76,7 +78,9 @@ static inline void all_vm_events(unsigned long *ret)
 static inline void vm_events_fold_cpu(int cpu)
 {
 }
-
+static inline void dump_vm_events_counter(void)
+{
+}
 #endif /* CONFIG_VM_EVENT_COUNTERS */
 
 #ifdef CONFIG_NUMA_BALANCING
@@ -153,6 +157,26 @@ static inline unsigned long zone_page_state_snapshot(struct zone *zone,
 	int cpu;
 	for_each_online_cpu(cpu)
 		x += per_cpu_ptr(zone->pageset, cpu)->vm_stat_diff[item];
+
+	if (x < 0)
+		x = 0;
+#endif
+	return x;
+}
+
+static inline unsigned long global_page_state_snapshot(enum zone_stat_item item)
+{
+	long x = atomic_long_read(&vm_stat[item]);
+
+#ifdef CONFIG_SMP
+	struct zone *zone;
+	int cpu;
+
+	for_each_online_cpu(cpu) {
+		for_each_populated_zone(zone)
+			x += per_cpu_ptr(zone->pageset,
+				cpu)->vm_stat_diff[item];
+	}
 
 	if (x < 0)
 		x = 0;

@@ -11,7 +11,7 @@
 #include <linux/interrupt.h>
 #include <linux/suspend.h>
 #include <linux/syscore_ops.h>
-
+#include <linux/wakeup_reason.h>
 #include "internals.h"
 
 bool irq_pm_check_wakeup(struct irq_desc *desc)
@@ -65,7 +65,8 @@ void irq_pm_remove_action(struct irq_desc *desc, struct irqaction *action)
 
 static bool suspend_device_irq(struct irq_desc *desc, int irq)
 {
-	if (!desc->action || desc->no_suspend_depth)
+	if (!desc->action || irq_desc_is_chained(desc) ||
+	    desc->no_suspend_depth)
 		return false;
 
 	if (irqd_is_wakeup_set(&desc->irq_data)) {

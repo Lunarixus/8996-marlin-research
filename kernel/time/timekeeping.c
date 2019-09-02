@@ -328,6 +328,18 @@ u64 notrace ktime_get_mono_fast_ns(void)
 }
 EXPORT_SYMBOL_GPL(ktime_get_mono_fast_ns);
 
+/*
+ * NMI safe and fast access to boot clock. We can't do tk_core seqcount reads
+ * here as this will livelock in NMI context so we sacrifice accuracy for
+ * safety. Worst case we may miss an update to tk->offs_boot.
+ */
+u64 notrace ktime_get_boot_fast_ns(void)
+{
+	struct timekeeper *tk = &tk_core.timekeeper;
+	return (ktime_get_mono_fast_ns() + ktime_to_ns(tk->offs_boot));
+}
+EXPORT_SYMBOL_GPL(ktime_get_boot_fast_ns);
+
 #ifdef CONFIG_GENERIC_TIME_VSYSCALL_OLD
 
 static inline void update_vsyscall(struct timekeeper *tk)
@@ -411,6 +423,7 @@ EXPORT_SYMBOL_GPL(pvclock_gtod_unregister_notifier);
  */
 static inline void tk_update_ktime_data(struct timekeeper *tk)
 {
+	u64 seconds;
 	s64 nsec;
 
 	/*
@@ -426,7 +439,9 @@ static inline void tk_update_ktime_data(struct timekeeper *tk)
 	tk->tkr_mono.base = ns_to_ktime(nsec);
 
 	/* Update the monotonic raw base */
-	tk->tkr_raw.base = ns_to_ktime(tk->raw_sec * NSEC_PER_SEC);
+	seconds = tk->raw_sec;
+	nsec = (u32)(tk->tkr_raw.xtime_nsec >> tk->tkr_raw.shift);
+	tk->tkr_raw.base = ns_to_ktime(seconds * NSEC_PER_SEC + nsec);
 }
 
 /* must hold timekeeper_lock */
@@ -907,20 +922,18 @@ int timekeeping_notify(struct clocksource *clock)
 void getrawmonotonic(struct timespec *ts)
 {
 	struct timekeeper *tk = &tk_core.timekeeper;
-	struct timespec64 ts64;
 	unsigned long seq;
 	s64 nsecs;
 
 	do {
 		seq = read_seqcount_begin(&tk_core.seq);
-		ts64.tv_sec = tk->raw_sec;
+		ts->tv_sec = tk->raw_sec;
 		nsecs = timekeeping_get_ns(&tk->tkr_raw);
 
 	} while (read_seqcount_retry(&tk_core.seq, seq));
 
-	ts64.tv_nsec = 0;
-	timespec64_add_ns(&ts64, nsecs);
-	*ts = timespec64_to_timespec(ts64);
+	ts->tv_nsec = 0;
+	timespec_add_ns(ts, nsecs);
 }
 EXPORT_SYMBOL(getrawmonotonic);
 

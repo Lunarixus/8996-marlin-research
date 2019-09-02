@@ -38,18 +38,11 @@ int unregister_pm_notifier(struct notifier_block *nb)
 }
 EXPORT_SYMBOL_GPL(unregister_pm_notifier);
 
-int __pm_notifier_call_chain(unsigned long val, int nr_to_call, int *nr_calls)
-{
-	int ret;
-
-	ret = __blocking_notifier_call_chain(&pm_chain_head, val, NULL,
-						nr_to_call, nr_calls);
-
-	return notifier_to_errno(ret);
-}
 int pm_notifier_call_chain(unsigned long val)
 {
-	return __pm_notifier_call_chain(val, -1, NULL);
+	int ret = blocking_notifier_call_chain(&pm_chain_head, val, NULL);
+
+	return notifier_to_errno(ret);
 }
 
 /* If set, devices may be suspended and resumed asynchronously. */
@@ -359,7 +352,15 @@ static ssize_t state_store(struct kobject *kobj, struct kobj_attribute *attr,
 
 	state = decode_state(buf, n);
 	if (state < PM_SUSPEND_MAX)
+#ifdef CONFIG_HTC_POWER_DEBUG
+        {
+                pr_info("[R] suspend start\n");
+#endif
 		error = pm_suspend(state);
+#ifdef CONFIG_HTC_POWER_DEBUG
+                pr_info("[R] resume end\n");
+        }
+#endif
 	else if (state == PM_SUSPEND_MAX)
 		error = hibernate();
 	else

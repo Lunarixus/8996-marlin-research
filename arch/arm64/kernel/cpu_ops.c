@@ -18,31 +18,23 @@
 
 #include <asm/cpu_ops.h>
 #include <asm/smp_plat.h>
+#include <linux/cache.h>
 #include <linux/errno.h>
 #include <linux/of.h>
 #include <linux/string.h>
 
-extern const struct cpu_operations smp_spin_table_ops;
-extern const struct cpu_operations cpu_psci_ops;
+const struct cpu_operations *cpu_ops[NR_CPUS] __ro_after_init;
+extern struct of_cpu_method __cpu_method_of_table[];
+static const struct of_cpu_method __cpu_method_of_table_sentinel
+	__used __section(__cpu_method_of_table_end);
 
-const struct cpu_operations *cpu_ops[NR_CPUS];
-
-static const struct cpu_operations *supported_cpu_ops[] __initconst = {
-	&smp_spin_table_ops,
-	&cpu_psci_ops,
-	NULL,
-};
-
-static const struct cpu_operations * __init cpu_get_ops(const char *name)
+const struct cpu_operations * __init cpu_get_ops(const char *name)
 {
-	const struct cpu_operations **ops = supported_cpu_ops;
+	struct of_cpu_method *m = __cpu_method_of_table;
 
-	while (*ops) {
-		if (!strcmp(name, (*ops)->name))
-			return *ops;
-
-		ops++;
-	}
+	for (; m->method; m++)
+		if (!strcmp(m->method, name))
+			return m->ops;
 
 	return NULL;
 }

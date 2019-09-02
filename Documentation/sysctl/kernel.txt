@@ -23,8 +23,10 @@ show up in /proc/sys/kernel:
 - auto_msgmni
 - bootloader_type	     [ X86 only ]
 - bootloader_version	     [ X86 only ]
+- boot_reason		     [ ARM and ARM64 only ]
 - callhome		     [ S390 only ]
 - cap_last_cap
+- cold_boot		     [ ARM and ARM64 only ]
 - core_pattern
 - core_pipe_limit
 - core_uses_pid
@@ -56,6 +58,7 @@ show up in /proc/sys/kernel:
 - panic_on_oops
 - panic_on_stackoverflow
 - panic_on_unrecovered_nmi
+- panic_on_rcu_stall
 - perf_cpu_time_max_percent
 - perf_event_paranoid
 - pid_max
@@ -154,6 +157,19 @@ Documentation/x86/boot.txt for additional information.
 
 ==============================================================
 
+boot_reason:
+
+ARM and ARM64 -- reason for device boot
+
+A single bit will be set in the unsigned integer value to identify the
+reason the device was booted / powered on. The value will be zero if this
+feature is not supported on the ARM device being booted.
+
+See the power-on-status field definitions in
+Documentation/arm/msm/boot.txt for Qualcomm's family of devices.
+
+==============================================================
+
 callhome:
 
 Controls the kernel's callhome behavior in case of a kernel panic.
@@ -173,6 +189,16 @@ cap_last_cap
 
 Highest valid capability of the running kernel.  Exports
 CAP_LAST_CAP from the kernel.
+
+===============================================================
+
+cold_boot
+
+ARM and ARM64 -- indicator for system cold boot
+
+A single bit will be set in the unsigned integer value to identify
+whether the device was booted from a cold or warm state. Zero
+indicating a warm boot and one indicating a cold boot.
 
 ==============================================================
 
@@ -372,6 +398,15 @@ values to unprivileged users is a concern.
 When kptr_restrict is set to (2), kernel pointers printed using
 %pK will be replaced with 0's regardless of privileges.
 
+When kptr_restrict is set to (3), kernel pointers printed using
+%p and %pK will be replaced with 0's regardless of privileges,
+however kernel pointers printed using %pP will continue to be printed.
+
+When kptr_restrict is set to (4), kernel pointers printed with
+%p, %pK, %pa, and %p[rR] will be replaced with 0's regardless of
+privileges. Kernel pointers printed using %pP will continue to be
+printed.
+
 ==============================================================
 
 kstack_depth_to_print: (X86 only)
@@ -562,6 +597,17 @@ dealt with than an uncorrected parity/ECC error get propagated.
 A small number of systems do generate NMI's for bizarre random reasons
 such as power management so the default is off. That sysctl works like
 the existing panic controls already in that directory.
+
+==============================================================
+
+panic_on_rcu_stall:
+
+When set to 1, calls panic() after RCU stall detection messages. This
+is useful to define the root cause of RCU stalls using a vmcore.
+
+0: do not panic() when RCU stall takes place, default behavior.
+
+1: panic() after printing RCU stall messages.
 
 ==============================================================
 

@@ -1613,7 +1613,8 @@ static struct sock *qtaguid_find_sk(const struct sk_buff *skb,
 		 * "struct inet_timewait_sock" which is missing fields.
 		 */
 		if (sk->sk_state  == TCP_TIME_WAIT) {
-			sock_gen_put(sk);
+			if (sk != skb->sk)
+				sock_gen_put(sk);
 			sk = NULL;
 		}
 	}
@@ -2299,8 +2300,7 @@ static int ctrl_cmd_tag(const char *input)
 			res = -ENOMEM;
 			goto err_put;
 		}
-		/*
-		 * Hold the sk refcount here to make sure the sk pointer cannot
+		/* Hold the sk refcount here to make sure the sk pointer cannot
 		 * be freed and reused
 		 */
 		sock_hold(el_socket->sk);

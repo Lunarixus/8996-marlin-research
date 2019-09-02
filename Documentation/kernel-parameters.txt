@@ -541,6 +541,10 @@ bytes respectively. Such letter suffixes can also be entirely omitted.
 			embedded devices based on command line input.
 			See Documentation/block/cmdline-partition.txt
 
+	boot_cpus=	[SMP]
+			Rather than attempting to online all possible CPUs at
+			boot time, only online the specified set of CPUs.
+
 	boot_delay=	Milliseconds to delay each printk during boot.
 			Values larger than 10 seconds (10000) are changed to
 			no delay (0).
@@ -962,6 +966,12 @@ bytes respectively. Such letter suffixes can also be entirely omitted.
 		msm_serial_dm,<addr>
 			Start an early, polled-mode console on an msm serial
 			dm port at the specified address. The serial port
+			must already be setup and configured. Options are not
+			yet supported.
+
+		msm_hsl_uart,<addr>
+			Start an early, polled-mode console on an msm serial
+			port at the specified address. The serial port
 			must already be setup and configured. Options are not
 			yet supported.
 
@@ -1954,7 +1964,7 @@ bytes respectively. Such letter suffixes can also be entirely omitted.
 			seconds.  Use this parameter to check at some
 			other rate.  0 disables periodic checking.
 
-	memtest=	[KNL,X86] Enable memtest
+	memtest=	[KNL,X86,ARM] Enable memtest
 			Format: <integer>
 			default : 0 <disable>
 			Specifies the number of memtest passes to be
@@ -2946,6 +2956,13 @@ bytes respectively. Such letter suffixes can also be entirely omitted.
 			Set delay between subsequent attempts to force
 			quiescent states.  Units are jiffies, minimum
 			value is one, and maximum value is HZ.
+
+	rcutree.kthread_prio= 	 [KNL,BOOT]
+			Set the SCHED_FIFO priority of the RCU
+			per-CPU kthreads (rcuc/N). This value is also
+			used for the priority of the RCU boost threads
+			(rcub/N). Valid values are 1-99 and the default
+			is 1 (the least-favored priority).
 
 	rcutree.rcu_nocb_leader_stride= [KNL]
 			Set the number of NOCB kthread groups, which

@@ -118,11 +118,14 @@ int snd_soc_cache_read(struct snd_soc_codec *codec,
 		return -EINVAL;
 
 	mutex_lock(&codec->cache_rw_mutex);
-	if (!ZERO_OR_NULL_PTR(codec->reg_cache))
+	if (!ZERO_OR_NULL_PTR(codec->reg_cache)) {
 		*value = snd_soc_get_cache_val(codec->reg_cache, reg,
 					       codec->driver->reg_word_size);
+	} else {
+		mutex_unlock(&codec->cache_rw_mutex);
+		return -EINVAL;
+	}
 	mutex_unlock(&codec->cache_rw_mutex);
-
 	return 0;
 }
 EXPORT_SYMBOL_GPL(snd_soc_cache_read);
@@ -163,6 +166,8 @@ static int snd_soc_flat_cache_sync(struct snd_soc_codec *codec)
 			if (snd_soc_get_cache_val(codec_drv->reg_cache_default,
 						  i, codec_drv->reg_word_size) == val)
 				continue;
+		WARN_ON(!snd_soc_codec_writable_register(codec, i));
+
 
 		ret = snd_soc_write(codec, i, val);
 		if (ret)

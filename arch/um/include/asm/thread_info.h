@@ -22,6 +22,7 @@ struct thread_info {
 	mm_segment_t		addr_limit;	/* thread address space:
 					 	   0-0xBFFFFFFF for user
 						   0-0xFFFFFFFF for kernel */
+	struct restart_block    restart_block;
 	struct thread_info	*real_thread;    /* Points to non-IRQ stack */
 };
 
@@ -33,6 +34,9 @@ struct thread_info {
 	.cpu =		0,			\
 	.preempt_count = INIT_PREEMPT_COUNT,	\
 	.addr_limit =	KERNEL_DS,		\
+	.restart_block =  {			\
+		.fn =  do_no_restart_syscall,	\
+	},					\
 	.real_thread = NULL,			\
 }
 
@@ -64,6 +68,7 @@ static inline struct thread_info *current_thread_info(void)
 #define TIF_SYSCALL_AUDIT	6
 #define TIF_RESTORE_SIGMASK	7
 #define TIF_NOTIFY_RESUME	8
+#define TIF_MM_RELEASED		9
 
 #define _TIF_SYSCALL_TRACE	(1 << TIF_SYSCALL_TRACE)
 #define _TIF_SIGPENDING		(1 << TIF_SIGPENDING)

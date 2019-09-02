@@ -15,7 +15,7 @@ enum dual_role_supported_modes {
 	DUAL_ROLE_PROP_SUPPORTED_MODES_TOTAL,
 };
 
-enum {
+enum dual_role_prop_mode {
 	DUAL_ROLE_PROP_MODE_UFP = 0,
 	DUAL_ROLE_PROP_MODE_DFP,
 	DUAL_ROLE_PROP_MODE_NONE,
@@ -23,7 +23,7 @@ enum {
 	DUAL_ROLE_PROP_MODE_TOTAL,
 };
 
-enum {
+enum dual_role_prop_power_role {
 	DUAL_ROLE_PROP_PR_SRC = 0,
 	DUAL_ROLE_PROP_PR_SNK,
 	DUAL_ROLE_PROP_PR_NONE,
@@ -32,7 +32,7 @@ enum {
 
 };
 
-enum {
+enum dual_role_prop_data_role {
 	DUAL_ROLE_PROP_DR_HOST = 0,
 	DUAL_ROLE_PROP_DR_DEVICE,
 	DUAL_ROLE_PROP_DR_NONE,
@@ -40,7 +40,7 @@ enum {
 	DUAL_ROLE_PROP_DR_TOTAL,
 };
 
-enum {
+enum dual_role_prop_vconn_supply {
 	DUAL_ROLE_PROP_VCONN_SUPPLY_NO = 0,
 	DUAL_ROLE_PROP_VCONN_SUPPLY_YES,
 /*The following should be the last element*/

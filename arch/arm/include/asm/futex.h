@@ -106,8 +106,6 @@ futex_atomic_cmpxchg_inatomic(u32 *uval, u32 __user *uaddr,
 	if (!access_ok(VERIFY_WRITE, uaddr, sizeof(u32)))
 		return -EFAULT;
 
-	preempt_disable();
-	__ua_flags = uaccess_save_and_enable();
 	__asm__ __volatile__("@futex_atomic_cmpxchg_inatomic\n"
 	"1:	" TUSER(ldr) "	%1, [%4]\n"
 	"	teq	%1, %2\n"
@@ -120,8 +118,6 @@ futex_atomic_cmpxchg_inatomic(u32 *uval, u32 __user *uaddr,
 	uaccess_restore(__ua_flags);
 
 	*uval = val;
-	preempt_enable();
-
 	return ret;
 }
 
@@ -142,10 +138,7 @@ futex_atomic_op_inuser (int encoded_op, u32 __user *uaddr)
 	if (!access_ok(VERIFY_WRITE, uaddr, sizeof(u32)))
 		return -EFAULT;
 
-#ifndef CONFIG_SMP
-	preempt_disable();
-#endif
-	pagefault_disable();
+	pagefault_disable();	/* implies preempt_disable() */
 
 	switch (op) {
 	case FUTEX_OP_SET:
@@ -167,10 +160,7 @@ futex_atomic_op_inuser (int encoded_op, u32 __user *uaddr)
 		ret = -ENOSYS;
 	}
 
-	pagefault_enable();
-#ifndef CONFIG_SMP
-	preempt_enable();
-#endif
+	pagefault_enable();	/* subsumes preempt_enable() */
 
 	if (!ret) {
 		switch (cmp) {

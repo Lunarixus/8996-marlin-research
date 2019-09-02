@@ -464,6 +464,16 @@ void dm_put_device(struct dm_target *ti, struct dm_dev *d)
 	struct list_head *devices = &ti->table->devices;
 	struct dm_dev_internal *dd;
 
+	if (!ti) {
+		DMERR("%s: dm_target pointer is NULL", __func__);
+		return;
+	}
+
+	if (!d) {
+		DMERR("%s: dm_dev pointer is NULL", __func__);
+		return;
+	}
+
 	list_for_each_entry(dd, devices, list) {
 		if (dd->dm_dev == d) {
 			found = 1;
@@ -507,14 +517,14 @@ static int adjoin(struct dm_table *table, struct dm_target *ti)
  * On the other hand, dm-switch needs to process bulk data using messages and
  * excessive use of GFP_NOIO could cause trouble.
  */
-static char **realloc_argv(unsigned *size, char **old_argv)
+static char **realloc_argv(unsigned *array_size, char **old_argv)
 {
 	char **argv;
 	unsigned new_size;
 	gfp_t gfp;
 
-	if (*size) {
-		new_size = *size * 2;
+	if (*array_size) {
+		new_size = *array_size * 2;
 		gfp = GFP_KERNEL;
 	} else {
 		new_size = 8;
@@ -522,8 +532,8 @@ static char **realloc_argv(unsigned *size, char **old_argv)
 	}
 	argv = kmalloc(new_size * sizeof(*argv), gfp);
 	if (argv) {
-		memcpy(argv, old_argv, *size * sizeof(*argv));
-		*size = new_size;
+		memcpy(argv, old_argv, *array_size * sizeof(*argv));
+		*array_size = new_size;
 	}
 
 	kfree(old_argv);

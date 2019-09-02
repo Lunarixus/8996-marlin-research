@@ -25,7 +25,7 @@
  * Byte threshold to limit memory consumption for flip buffers.
  * The actual memory limit is > 2x this amount.
  */
-#define TTYB_DEFAULT_MEM_LIMIT	65536
+#define TTYB_DEFAULT_MEM_LIMIT	131072
 
 /*
  * We default to dicing tty buffer allocations to this many characters
@@ -72,7 +72,7 @@ void tty_buffer_unlock_exclusive(struct tty_port *port)
 	atomic_dec(&buf->priority);
 	mutex_unlock(&buf->lock);
 	if (restart)
-		queue_work(system_unbound_wq, &buf->work);
+		queue_kthread_work(&port->worker, &buf->work);
 }
 EXPORT_SYMBOL_GPL(tty_buffer_unlock_exclusive);
 
@@ -133,6 +133,8 @@ void tty_buffer_free_all(struct tty_port *port)
 	buf->tail = &buf->sentinel;
 
 	atomic_set(&buf->mem_used, 0);
+	if (!IS_ERR_OR_NULL(port->worker_thread))
+		kthread_stop(port->worker_thread);
 }
 
 /**
@@ -218,7 +220,10 @@ void tty_buffer_flush(struct tty_struct *tty)
 	atomic_inc(&buf->priority);
 
 	mutex_lock(&buf->lock);
-	while ((next = buf->head->next) != NULL) {
+	/* paired w/ release in __tty_buffer_request_room; ensures there are
+	 * no pending memory accesses to the freed buffer
+	 */
+	while ((next = smp_load_acquire(&buf->head->next)) != NULL) {
 		tty_buffer_free(port, buf->head);
 		buf->head = next;
 	}
@@ -259,7 +264,10 @@ static int __tty_buffer_request_room(struct tty_port *port, size_t size,
 		if ((n = tty_buffer_alloc(port, size)) != NULL) {
 			n->flags = flags;
 			buf->tail = n;
-			b->commit = b->used;
+			/* paired w/ acquire in flush_to_ldisc(); ensures
+			 * flush_to_ldisc() sees buffer data.
+			 */
+			smp_store_release(&b->commit, b->used);
 			/* paired w/ barrier in flush_to_ldisc(); ensures the
 			 * latest commit value can be read before the head is
 			 * advanced to the next buffer
@@ -363,8 +371,11 @@ void tty_schedule_flip(struct tty_port *port)
 {
 	struct tty_bufhead *buf = &port->buf;
 
-	buf->tail->commit = buf->tail->used;
-	schedule_work(&buf->work);
+	/* paired w/ acquire in flush_to_ldisc(); ensures
+	 * flush_to_ldisc() sees buffer data.
+	 */
+	smp_store_release(&buf->tail->commit, buf->tail->used);
+	queue_kthread_work(&port->worker, &buf->work);
 }
 EXPORT_SYMBOL(tty_schedule_flip);
 
@@ -433,14 +444,14 @@ receive_buf(struct tty_struct *tty, struct tty_buffer *head, int count)
  *		 'consumer'
  */
 
-static void flush_to_ldisc(struct work_struct *work)
+static void flush_to_ldisc(struct kthread_work *work)
 {
 	struct tty_port *port = container_of(work, struct tty_port, buf.work);
 	struct tty_bufhead *buf = &port->buf;
 	struct tty_struct *tty;
 	struct tty_ldisc *disc;
 
-	tty = port->itty;
+	tty = READ_ONCE(port->itty);
 	if (tty == NULL)
 		return;
 
@@ -465,7 +476,10 @@ static void flush_to_ldisc(struct work_struct *work)
 		 * is advancing to the next buffer
 		 */
 		smp_rmb();
-		count = head->commit - head->read;
+		/* paired w/ release in __tty_buffer_request_room() or in
+		 * tty_buffer_flush(); ensures we see the committed buffer data
+		 */
+		count = smp_load_acquire(&head->commit) - head->read;
 		if (!count) {
 			if (next == NULL)
 				break;
@@ -494,7 +508,7 @@ static void flush_to_ldisc(struct work_struct *work)
  */
 void tty_flush_to_ldisc(struct tty_struct *tty)
 {
-	flush_work(&tty->port->buf.work);
+	flush_kthread_work(&tty->port->buf.work);
 }
 
 /**
@@ -533,8 +547,18 @@ void tty_buffer_init(struct tty_port *port)
 	init_llist_head(&buf->free);
 	atomic_set(&buf->mem_used, 0);
 	atomic_set(&buf->priority, 0);
-	INIT_WORK(&buf->work, flush_to_ldisc);
 	buf->mem_limit = TTYB_DEFAULT_MEM_LIMIT;
+	init_kthread_work(&buf->work, flush_to_ldisc);
+	init_kthread_worker(&port->worker);
+	port->worker_thread = kthread_run(kthread_worker_fn, &port->worker,
+					  "tty_worker_thread");
+	if (IS_ERR(port->worker_thread)) {
+		/*
+		 * Not good, we can't unwind, this tty is going to be really
+		 * sad...
+		 */
+		pr_err("Unable to start tty_worker_thread\n");
+	}
 }
 
 /**

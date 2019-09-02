@@ -14,6 +14,7 @@
 #include <linux/sched.h>
 #include <linux/kernel.h>
 #include <linux/mm.h>
+#include <linux/vmalloc.h>
 #include <linux/stddef.h>
 #include <linux/unistd.h>
 #include <linux/user.h>
@@ -42,8 +43,8 @@
 #include <asm/system_misc.h>
 #include <asm/mach/time.h>
 #include <asm/tls.h>
-#include <asm/vdso.h>
 #include "reboot.h"
+#include <asm/vdso.h>
 
 #ifdef CONFIG_CC_STACKPROTECTOR
 #include <linux/stackprotector.h>
@@ -171,7 +172,8 @@ void (*arm_pm_restart)(enum reboot_mode reboot_mode, const char *cmd);
  * This is our default idle handler.
  */
 
-void (*arm_pm_idle)(void);
+extern void arch_idle(void);
+void (*arm_pm_idle)(void) = arch_idle;
 
 /*
  * Called from the core idle loop.
@@ -311,10 +313,12 @@ static void show_data(unsigned long addr, int nbytes, const char *name)
 	u32	*p;
 
 	/*
-	 * don't attempt to dump non-kernel addresses or
-	 * values that are probably just small negative numbers
+	 * don't attempt to dump non-kernel addresses, values that are probably
+	 * just small negative numbers, or vmalloc addresses that may point to
+	 * memory-mapped peripherals
 	 */
-	if (addr < PAGE_OFFSET || addr > -256UL)
+	if (addr < PAGE_OFFSET || addr > -256UL ||
+	    is_vmalloc_addr((void *)addr))
 		return;
 
 	printk("\n%s: %#lx:\n", name, addr);
@@ -336,7 +340,8 @@ static void show_data(unsigned long addr, int nbytes, const char *name)
 		printk("%04lx ", (unsigned long)p & 0xffff);
 		for (j = 0; j < 8; j++) {
 			u32	data;
-			if (probe_kernel_address(p, data)) {
+			if (!virt_addr_valid(p) ||
+			    probe_kernel_address(p, data)) {
 				printk(" ********");
 			} else {
 				printk(" %08x", data);
@@ -349,10 +354,6 @@ static void show_data(unsigned long addr, int nbytes, const char *name)
 
 static void show_extra_register_data(struct pt_regs *regs, int nbytes)
 {
-	mm_segment_t fs;
-
-	fs = get_fs();
-	set_fs(KERNEL_DS);
 	show_data(regs->ARM_pc - nbytes, nbytes * 2, "PC");
 	show_data(regs->ARM_lr - nbytes, nbytes * 2, "LR");
 	show_data(regs->ARM_sp - nbytes, nbytes * 2, "SP");
@@ -369,7 +370,6 @@ static void show_extra_register_data(struct pt_regs *regs, int nbytes)
 	show_data(regs->ARM_r8 - nbytes, nbytes * 2, "R8");
 	show_data(regs->ARM_r9 - nbytes, nbytes * 2, "R9");
 	show_data(regs->ARM_r10 - nbytes, nbytes * 2, "R10");
-	set_fs(fs);
 }
 
 void __show_regs(struct pt_regs *regs)
@@ -403,36 +403,12 @@ void __show_regs(struct pt_regs *regs)
 	buf[4] = '\0';
 
 #ifndef CONFIG_CPU_V7M
-	{
-		unsigned int domain = get_domain();
-		const char *segment;
-
-#ifdef CONFIG_CPU_SW_DOMAIN_PAN
-		/*
-		 * Get the domain register for the parent context. In user
-		 * mode, we don't save the DACR, so lets use what it should
-		 * be. For other modes, we place it after the pt_regs struct.
-		 */
-		if (user_mode(regs))
-			domain = DACR_UACCESS_ENABLE;
-		else
-			domain = *(unsigned int *)(regs + 1);
-#endif
-
-		if ((domain & domain_mask(DOMAIN_USER)) ==
-		    domain_val(DOMAIN_USER, DOMAIN_NOACCESS))
-			segment = "none";
-		else if (get_fs() == get_ds())
-			segment = "kernel";
-		else
-			segment = "user";
-
-		printk("Flags: %s  IRQs o%s  FIQs o%s  Mode %s  ISA %s  Segment %s\n",
-			buf, interrupts_enabled(regs) ? "n" : "ff",
-			fast_interrupts_enabled(regs) ? "n" : "ff",
-			processor_modes[processor_mode(regs)],
-			isa_modes[isa_mode(regs)], segment);
-	}
+	printk("Flags: %s  IRQs o%s  FIQs o%s  Mode %s  ISA %s  Segment %s\n",
+		buf, interrupts_enabled(regs) ? "n" : "ff",
+		fast_interrupts_enabled(regs) ? "n" : "ff",
+		processor_modes[processor_mode(regs)],
+		isa_modes[isa_mode(regs)],
+		get_fs() == get_ds() ? "kernel" : "user");
 #else
 	printk("xPSR: %08lx\n", regs->ARM_cpsr);
 #endif
@@ -444,9 +420,10 @@ void __show_regs(struct pt_regs *regs)
 		buf[0] = '\0';
 #ifdef CONFIG_CPU_CP15_MMU
 		{
-			unsigned int transbase, dac = get_domain();
+			unsigned int transbase, dac;
 			asm("mrc p15, 0, %0, c2, c0\n\t"
-			    : "=r" (transbase));
+			    "mrc p15, 0, %1, c3, c0\n"
+			    : "=r" (transbase), "=r" (dac));
 			snprintf(buf, sizeof(buf), "  Table: %08x  DAC: %08x",
 			  	transbase, dac);
 		}
@@ -456,8 +433,8 @@ void __show_regs(struct pt_regs *regs)
 		printk("Control: %08x%s\n", ctrl, buf);
 	}
 #endif
-
-	show_extra_register_data(regs, 128);
+	if (get_fs() == get_ds())
+		show_extra_register_data(regs, 128);
 }
 
 void show_regs(struct pt_regs * regs)
@@ -508,16 +485,6 @@ copy_thread(unsigned long clone_flags, unsigned long stack_start,
 	struct pt_regs *childregs = task_pt_regs(p);
 
 	memset(&thread->cpu_context, 0, sizeof(struct cpu_context_save));
-
-#ifdef CONFIG_CPU_USE_DOMAINS
-	/*
-	 * Copy the initial value of the domain access control register
-	 * from the current thread: thread->addr_limit will have been
-	 * copied from the current thread via setup_thread_stack() in
-	 * kernel/fork.c
-	 */
-	thread->cpu_domain = get_domain();
-#endif
 
 	if (likely(!(p->flags & PF_KTHREAD))) {
 		*childregs = *current_pt_regs();

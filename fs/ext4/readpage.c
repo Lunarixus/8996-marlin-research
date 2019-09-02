@@ -45,7 +45,6 @@
 #include <linux/cleancache.h>
 
 #include "ext4.h"
-#include <trace/events/android_fs.h>
 
 /*
  * Call ext4_decrypt on every single page, reusing the encryption
@@ -63,12 +62,16 @@ static void completion_pages(struct work_struct *work)
 	bio_for_each_segment_all(bv, bio, i) {
 		struct page *page = bv->bv_page;
 
-		int ret = ext4_decrypt(page);
-		if (ret) {
-			WARN_ON_ONCE(1);
-			SetPageError(page);
-		} else
+		if (bio->bi_crypt_ctx.bc_flags & BC_ENCRYPT_FL) {
 			SetPageUptodate(page);
+		} else {
+			int ret = ext4_decrypt(page);
+			if (ret) {
+				WARN_ON_ONCE(1);
+				SetPageError(page);
+			} else
+				SetPageUptodate(page);
+		}
 		unlock_page(page);
 	}
 	ext4_release_crypto_ctx(ctx);
@@ -87,17 +90,6 @@ static inline bool ext4_bio_encrypted(struct bio *bio)
 #endif
 }
 
-static void
-ext4_trace_read_completion(struct bio *bio, int err)
-{
-	struct page *first_page = bio->bi_io_vec[0].bv_page;
-
-	if (first_page != NULL)
-		trace_android_fs_dataread_end(first_page->mapping->host,
-					      page_offset(first_page),
-					      bio->bi_iter.bi_size);
-}
-
 /*
  * I/O completion handler for multipage BIOs.
  *
@@ -114,9 +106,6 @@ static void mpage_end_io(struct bio *bio, int err)
 {
 	struct bio_vec *bv;
 	int i;
-
-	if (trace_android_fs_dataread_start_enabled())
-		ext4_trace_read_completion(bio, err);
 
 	if (ext4_bio_encrypted(bio)) {
 		struct ext4_crypto_ctx *ctx = bio->bi_private;
@@ -143,30 +132,6 @@ static void mpage_end_io(struct bio *bio, int err)
 	}
 
 	bio_put(bio);
-}
-
-static void
-ext4_submit_bio_read(struct bio *bio)
-{
-	if (trace_android_fs_dataread_start_enabled()) {
-		struct page *first_page = bio->bi_io_vec[0].bv_page;
-
-		if (first_page != NULL) {
-			char *path, pathbuf[MAX_TRACE_PATHBUF_LEN];
-
-			path = android_fstrace_get_pathname(pathbuf,
-						    MAX_TRACE_PATHBUF_LEN,
-						    first_page->mapping->host);
-			trace_android_fs_dataread_start(
-				first_page->mapping->host,
-				page_offset(first_page),
-				bio->bi_iter.bi_size,
-				current->pid,
-				path,
-				current->comm);
-		}
-	}
-	submit_bio(READ, bio);
 }
 
 int ext4_mpage_readpages(struct address_space *mapping,
@@ -310,7 +275,10 @@ int ext4_mpage_readpages(struct address_space *mapping,
 		 */
 		if (bio && (last_block_in_bio != blocks[0] - 1)) {
 		submit_and_realloc:
-			ext4_submit_bio_read(bio);
+#ifdef CONFIG_EXT4_FS_ENCRYPTION
+			ext4_set_bio_crypt_context(inode, bio);
+#endif
+			submit_bio(READ, bio);
 			bio = NULL;
 		}
 		if (bio == NULL) {
@@ -342,14 +310,20 @@ int ext4_mpage_readpages(struct address_space *mapping,
 		if (((map.m_flags & EXT4_MAP_BOUNDARY) &&
 		     (relative_block == map.m_len)) ||
 		    (first_hole != blocks_per_page)) {
-			ext4_submit_bio_read(bio);
+#ifdef CONFIG_EXT4_FS_ENCRYPTION
+			ext4_set_bio_crypt_context(inode, bio);
+#endif
+			submit_bio(READ, bio);
 			bio = NULL;
 		} else
 			last_block_in_bio = blocks[blocks_per_page - 1];
 		goto next_page;
 	confused:
 		if (bio) {
-			ext4_submit_bio_read(bio);
+#ifdef CONFIG_EXT4_FS_ENCRYPTION
+			ext4_set_bio_crypt_context(inode, bio);
+#endif
+			submit_bio(READ, bio);
 			bio = NULL;
 		}
 		if (!PageUptodate(page))
@@ -361,7 +335,11 @@ int ext4_mpage_readpages(struct address_space *mapping,
 			page_cache_release(page);
 	}
 	BUG_ON(pages && !list_empty(pages));
-	if (bio)
-		ext4_submit_bio_read(bio);
+	if (bio) {
+#ifdef CONFIG_EXT4_FS_ENCRYPTION
+		ext4_set_bio_crypt_context(inode, bio);
+#endif
+		submit_bio(READ, bio);
+	}
 	return 0;
 }

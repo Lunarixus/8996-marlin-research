@@ -21,8 +21,6 @@
 
 #ifndef __ASSEMBLY__
 
-#include <asm/cpufeature.h>
-
 typedef struct {
 	atomic64_t	id;
 	void		*vdso;

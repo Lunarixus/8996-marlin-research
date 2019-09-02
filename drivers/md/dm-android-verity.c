@@ -65,7 +65,6 @@ static struct target_type android_verity_target = {
 	.io_hints               = verity_io_hints,
 };
 
-#ifndef MODULE
 static int __init verified_boot_state_param(char *line)
 {
 	strlcpy(verifiedbootstate, line, sizeof(verifiedbootstate));
@@ -97,7 +96,6 @@ static int __init verity_buildvariant(char *line)
 }
 
 __setup("buildvariant=", verity_buildvariant);
-#endif
 
 static inline bool default_verity_key_id(void)
 {
@@ -275,7 +273,10 @@ static inline int validate_fec_header(struct fec_header *header, u64 offset)
 		le32_to_cpu(header->version) != FEC_VERSION ||
 		le32_to_cpu(header->size) != sizeof(struct fec_header) ||
 		le32_to_cpu(header->roots) == 0 ||
-		le32_to_cpu(header->roots) >= FEC_RSM)
+		le32_to_cpu(header->roots) >= FEC_RSM ||
+		offset < le32_to_cpu(header->fec_size) ||
+		offset - le32_to_cpu(header->fec_size) !=
+		le64_to_cpu(header->inp_size))
 		return -EINVAL;
 
 	return 0;
@@ -695,7 +696,7 @@ static int android_verity_ctr(struct dm_target *ti, unsigned argc, char **argv)
 	dev_t uninitialized_var(dev);
 	struct android_metadata *metadata = NULL;
 	int err = 0, i, mode;
-	char *key_id, *table_ptr, dummy, *target_device,
+	char *key_id = NULL, *table_ptr, dummy, *target_device,
 	*verity_table_args[VERITY_TABLE_ARGS + 2 + VERITY_TABLE_OPT_FEC_ARGS];
 	/* One for specifying number of opt args and one for mode */
 	sector_t data_sectors;
@@ -727,21 +728,9 @@ static int android_verity_ctr(struct dm_target *ti, unsigned argc, char **argv)
 
 	dev = name_to_dev_t(target_device);
 	if (!dev) {
-		const unsigned int timeout_ms = DM_VERITY_WAIT_DEV_TIMEOUT_MS;
-		unsigned int wait_time_ms = 0;
-
-		DMERR("android_verity_ctr: retry %s\n", target_device);
-		while (driver_probe_done() != 0 ||
-			(dev = name_to_dev_t(target_device)) == 0) {
-			msleep(100);
-			wait_time_ms += 100;
-			if (wait_time_ms > timeout_ms) {
-				DMERR("android_verity_ctr: retry timeout(%dms)\n", timeout_ms);
-				DMERR("no dev found for %s", target_device);
-				handle_error();
-				return -EINVAL;
-			}
-		}
+		DMERR("no dev found for %s", target_device);
+		handle_error();
+		return -EINVAL;
 	}
 
 	if (is_eng())
